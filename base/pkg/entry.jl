@@ -610,6 +610,7 @@ function build(pkg::AbstractString, build_file::AbstractString, errfile::Abstrac
         --color=$(Base.have_color ? "yes" : "no")
         --compilecache=$(Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
         --history-file=no
+        --startup-file=$(Base.JLOptions().startupfile != 2 ? "yes" : "no")
         --eval $code
         ```
 
@@ -709,6 +710,7 @@ function test!(pkg::AbstractString,
         push!(notests, pkg)
     else
         info("Testing $pkg")
+        code = "evalfile(\"$test_path\")"
         cd(dirname(test_path)) do
             try
                 cmd = ```
@@ -717,7 +719,8 @@ function test!(pkg::AbstractString,
                     --color=$(Base.have_color ? "yes" : "no")
                     --compilecache=$(Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
                     --check-bounds=yes
-                    $test_path
+                    --startup-file=$(Base.JLOptions().startupfile != 2 ? "yes" : "no")
+                    --eval $code
                     ```
                 run(cmd)
                 info("$pkg tests passed")
