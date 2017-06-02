@@ -45,6 +45,8 @@ include("indices.jl")
 include("array.jl")
 include("abstractarray.jl")
 
+include("namedtuple.jl")
+
 include("hashing.jl")
 include("nofloat_hashing.jl")
 
