@@ -1294,11 +1294,11 @@ export
 
     # platform-conditional code
     @static,
-    is_windows,
-    is_linux,
-    is_apple,
-    is_bsd,
-    is_unix,
+    iswindows,
+    islinux,
+    isapple,
+    isbsd,
+    isunix,
 
     # tasks
     @schedule,

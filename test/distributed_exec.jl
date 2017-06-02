@@ -48,10 +48,10 @@ end
 
 # Test that the client port is reused. SO_REUSEPORT may not be supported on
 # all UNIX platforms, Linux kernels prior to 3.9 and older versions of OSX
-if is_unix()
+if isunix()
     # Run reuse client port tests only if SO_REUSEPORT is supported.
     s = TCPSocket(delay = false)
-    is_linux() && Base.Distributed.bind_client_port(s)
+    islinux() && Base.Distributed.bind_client_port(s)
     if ccall(:jl_tcp_reuseport, Int32, (Ptr{Void},), s.handle) == 0
         reuseport_tests()
     else
@@ -275,7 +275,7 @@ test_indexing(RemoteChannel(id_other))
 
 dims = (20,20,20)
 
-if is_linux()
+if islinux()
     S = SharedArray{Int64,3}(dims)
     @test startswith(S.segname, "/jl")
     @test !ispath("/dev/shm" * S.segname)
@@ -967,7 +967,7 @@ if DoFullTest
     @test workers() == all_w
     @test all([p == remotecall_fetch(myid, p) for p in all_w])
 
-if is_unix() # aka have ssh
+if isunix() # aka have ssh
     function test_n_remove_pids(new_pids)
         for p in new_pids
             w_in_remote = sort(remotecall_fetch(workers, p))
@@ -1238,7 +1238,7 @@ const get_num_threads = function() # anonymous so it will be serialized when cal
         end
 
         # OSX BLAS looks at an environment variable
-        if is_apple()
+        if isapple()
             return ENV["VECLIB_MAXIMUM_THREADS"]
         end
     end

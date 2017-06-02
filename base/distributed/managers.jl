@@ -455,11 +455,11 @@ end
 const client_port = Ref{Cushort}(0)
 
 function socket_reuse_port()
-    @static if is_linux() || is_apple()
+    @static if islinux() || isapple()
         s = TCPSocket(delay = false)
 
         # Linux requires the port to be bound before setting REUSEPORT, OSX after.
-        is_linux() && bind_client_port(s)
+        islinux() && bind_client_port(s)
         rc = ccall(:jl_tcp_reuseport, Int32, (Ptr{Void},), s.handle)
         if rc > 0  # SO_REUSEPORT is unsupported, just return the ephemerally bound socket
             return s
@@ -470,7 +470,7 @@ function socket_reuse_port()
             # provide a clean new socket
             return TCPSocket()
         end
-        is_apple() && bind_client_port(s)
+        isapple() && bind_client_port(s)
         return s
     else
         return TCPSocket()

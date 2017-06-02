@@ -316,7 +316,7 @@ temp_pkg_dir() do
         include(Pkg.dir("Example","src","Example.jl"))
         meth = first(methods(Example.domath))
         fname = string(meth.file)
-        @test ('\\' in fname) == is_windows()
+        @test ('\\' in fname) == iswindows()
         @test startswith(Base.url(meth), "https://github.com/JuliaLang/Example.jl/tree")
     end
 
