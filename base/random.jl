@@ -359,9 +359,8 @@ function rand(r::AbstractRNG, t::Dict)
         Base.isslotfilled(t, i) && @inbounds return (t.keys[i] => t.vals[i])
     end
 end
-rand(t::Dict) = rand(GLOBAL_RNG, t)
+
 rand(r::AbstractRNG, s::Set) = rand(r, s.dict).first
-rand(s::Set) = rand(GLOBAL_RNG, s)
 
 function rand(r::AbstractRNG, s::IntSet)
     isempty(s) && throw(ArgumentError("collection must be non-empty"))
@@ -375,7 +374,16 @@ function rand(r::AbstractRNG, s::IntSet)
     end
 end
 
-rand(s::IntSet) = rand(GLOBAL_RNG, s)
+function nth(iter, n::Integer)::eltype(iter)
+    for (i, x) in enumerate(iter)
+        i == n && return x
+    end
+end
+nth(iter::AbstractArray, n::Integer) = iter[n]
+
+rand(r::AbstractRNG, s::Union{Associative,AbstractSet}) = nth(s, rand(r, 1:length(s)))
+
+rand(s::Union{Associative,AbstractSet}) = rand(GLOBAL_RNG, s)
 
 ## Arrays of random numbers
 
@@ -395,21 +403,20 @@ function rand!{T}(r::AbstractRNG, A::AbstractArray{T})
     A
 end
 
-function rand!(r::AbstractRNG, A::AbstractArray, s::Union{Dict,Set,IntSet})
+function rand!(r::AbstractRNG, A::AbstractArray, s::Union{Associative,AbstractSet})
     for i in eachindex(A)
         @inbounds A[i] = rand(r, s)
     end
     A
 end
 
-rand!(A::AbstractArray, s::Union{Dict,Set,IntSet}) = rand!(GLOBAL_RNG, A, s)
+rand!(A::AbstractArray, s::Union{Associative,AbstractSet}) = rand!(GLOBAL_RNG, A, s)
 
-rand(r::AbstractRNG, s::Dict{K,V}, dims::Dims) where {K,V} = rand!(r, Array{Pair{K,V}}(dims), s)
-rand(r::AbstractRNG, s::Set{T}, dims::Dims) where {T} = rand!(r, Array{T}(dims), s)
-rand(r::AbstractRNG, s::IntSet, dims::Dims) = rand!(r, Array{Int}(dims), s)
-rand(r::AbstractRNG, s::Union{Dict,Set,IntSet}, dims::Integer...) = rand(r, s, convert(Dims, dims))
-rand(s::Union{Dict,Set,IntSet}, dims::Integer...) = rand(GLOBAL_RNG, s, dims)
-rand(s::Union{Dict,Set,IntSet}, dims::Dims) = rand(GLOBAL_RNG, s, dims)
+rand(r::AbstractRNG, s::Associative{K,V}, dims::Dims) where {K,V} = rand!(r, Array{Pair{K,V}}(dims), s)
+rand(r::AbstractRNG, s::AbstractSet{T}, dims::Dims) where {T} = rand!(r, Array{T}(dims), s)
+rand(r::AbstractRNG, s::Union{Associative,AbstractSet}, dims::Integer...) = rand(r, s, convert(Dims, dims))
+rand(s::Union{Associative,AbstractSet}, dims::Integer...) = rand(GLOBAL_RNG, s, dims)
+rand(s::Union{Associative,AbstractSet}, dims::Dims) = rand(GLOBAL_RNG, s, dims)
 
 # MersenneTwister
 

@@ -1,5 +1,22 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+# should be in base/test.jl, but does not compile...
+
+for (G, A) in ((GenericSet, AbstractSet),
+               (GenericDict, Associative))
+   @eval begin
+      Base.convert(::Type{$G}, s::$A) = $G(s)
+       Base.done(s::$G, state) = done(s.s, state)
+      Base.next(s::$G, state) = next(s.s, state)
+  end
+   for f in (:eltype, :isempty, :length, :start)
+       @eval begin
+           Base.$f(s::$G) = $f(s.s)
+       end
+    end
+end
+
+
 # Issue #6573
 srand(0); rand(); x = rand(384)
 @test find(x .== rand()) == []
@@ -314,6 +331,9 @@ for rng in ([], [MersenneTwister(0)], [RandomDevice()])
                    (Dict(zip(rand(Int,10), rand(Int, 10))), Pair{Int,Int}),
                    (1:100, Int),
                    (rand(Int, 100), Int)]
+    push!(collections, (GenericSet(collections[2][1]), Int),
+          (GenericDict(collections[3][1]), Pair{Int,Int}))
+
     b2 = big(2)
     u3 = UInt(3)
     for f in [rand, randn, randexp]
@@ -345,7 +365,8 @@ for rng in ([], [MersenneTwister(0)], [RandomDevice()])
             @test a in C
         end
     end
-    for C in [1:0, Dict(), Set(), IntSet(), Int[]]
+    for C in [1:0, Dict(), Set(), IntSet(), Int[],
+              GenericDict(Dict()), GenericSet(Set())]
         @test_throws ArgumentError rand(rng..., C)
         @test_throws ArgumentError rand(rng..., C, 5)
     end
