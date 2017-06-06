@@ -264,6 +264,12 @@ Pick a random element or array of random elements from the set of values specifi
 
 `S` defaults to [`Float64`](@ref).
 
+Note that the complexity of `rand(rng, s::AbstractString)` is linear
+in the length of `s` if `s` is not of type `String`. If called more
+than a few times, you should use `rand(rng, collect(s))` instead.
+
+# Examples
+
 ```julia-repl
 julia> rand(Int, 2)
 2-element Array{Int64,1}:
