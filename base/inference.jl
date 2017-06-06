@@ -836,13 +836,6 @@ function type_more_complex(t::ANY, c::ANY, sources::SimpleVector, tupledepth::In
             end
             return false
         end
-        if tupledepth > 0
-            # allow deviation in the type name, if all of its parameters are also monotonically simpler
-            for i = 1:length(tP)
-                is_derived_type_from_any(tP[i], sources) || return true
-            end
-            return false
-        end
         if isType(t) # allow taking typeof any source type anywhere as Type{...}, as long as it isn't nesting Type{Type{...}}
             tt = unwrap_unionall(t.parameters[1])
             if isa(tt, DataType) && !isType(tt)
