@@ -643,7 +643,7 @@ typedef struct {
 } bt_cursor_t;
 #endif
 extern volatile int jl_in_stackwalk;
-#else
+#elif !defined(JL_DISABLE_LIBUNWIND)
 // This gives unwind only local unwinding options ==> faster code
 #  define UNW_LOCAL_ONLY
 #  include <libunwind.h>
@@ -655,6 +655,10 @@ typedef unw_cursor_t bt_cursor_t;
 // on a newer release
 #    define JL_UNW_HAS_FORMAT_IP 1
 #  endif
+#else
+// Unwinding is disabled
+typedef int bt_context_t;
+typedef int bt_cursor_t;
 #endif
 size_t rec_backtrace(uintptr_t *data, size_t maxsize);
 size_t rec_backtrace_ctx(uintptr_t *data, size_t maxsize, bt_context_t *ctx);
@@ -662,7 +666,7 @@ size_t rec_backtrace_ctx(uintptr_t *data, size_t maxsize, bt_context_t *ctx);
 size_t rec_backtrace_ctx_dwarf(uintptr_t *data, size_t maxsize, bt_context_t *ctx);
 #endif
 JL_DLLEXPORT jl_value_t *jl_get_backtrace(void);
-JL_DLLEXPORT jl_value_t *jl_apply_with_saved_exception_state(jl_value_t **args, uint32_t nargs, int catch_exceptions);
+JL_DLLEXPORT jl_value_t *jl_apply_with_saved_exception_state(jl_value_t **args, uint32_t nargs, int drop_exceptions);
 void jl_critical_error(int sig, bt_context_t *context, uintptr_t *bt_data, size_t *bt_size);
 JL_DLLEXPORT void jl_raise_debugger(void);
 int jl_getFunctionInfo(jl_frame_t **frames, uintptr_t pointer, int skipC, int noInline);
@@ -975,6 +979,7 @@ extern jl_sym_t *meta_sym; extern jl_sym_t *list_sym;
 extern jl_sym_t *inert_sym; extern jl_sym_t *static_parameter_sym;
 extern jl_sym_t *polly_sym; extern jl_sym_t *inline_sym;
 extern jl_sym_t *propagate_inbounds_sym;
+extern jl_sym_t *isdefined_sym;
 
 #ifdef __cplusplus
 }

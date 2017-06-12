@@ -26,6 +26,7 @@ OPENBLAS_USE_THREAD:=1
 # Use libraries available on the system instead of building them
 USE_SYSTEM_LLVM:=0
 USE_SYSTEM_LIBUNWIND:=0
+DISABLE_LIBUNWIND:=0
 USE_SYSTEM_PCRE:=0
 USE_SYSTEM_LIBM:=0
 USE_SYSTEM_OPENLIBM:=0
@@ -524,6 +525,36 @@ ifeq (exists, $(shell [ -e $(BUILDROOT)/Make.user ] && echo exists ))
 include $(BUILDROOT)/Make.user
 endif
 
+# A bit of a kludge to work around libraries linking to FreeBSD's outdated system libgcc_s
+# Instead, let's link to the libgcc_s corresponding to the installation of gfortran
+ifeq ($(OS),FreeBSD)
+ifneq (,$(findstring gfortran,$(FC)))
+
+# First let's figure out what version of GCC we're dealing with
+_GCCMAJOR := $(shell $(FC) -dumpversion | cut -d'.' -f1)
+_GCCMINOR := $(shell $(FC) -dumpversion | cut -d'.' -f2)
+
+# The ports system uses major and minor for GCC < 5 (e.g. gcc49 for GCC 4.9), otherwise major only
+ifeq ($(_GCCMAJOR),4)
+  _GCCVER := $(_GCCMAJOR)$(_GCCMINOR)
+else
+  _GCCVER := $(_GCCMAJOR)
+endif
+
+# Allow the user to specify this in Make.user
+GCCPATH ?= $(LOCALBASE)/lib/gcc$(_GCCVER)
+
+LDFLAGS += -L$(build_libdir) -L$(GCCPATH) -Wl,-rpath,$(build_libdir) -Wl,-rpath,$(GCCPATH)
+
+# This ensures we get the right RPATH even if we're missing FFLAGS somewhere
+FC += -Wl,-rpath=$(GCCPATH)
+
+# Build our own libc++ and libc++abi because otherwise /usr/lib/libc++.so and /lib/libcxxrt.so will
+# be linked in when building LLVM, and those link to /lib/libgcc_s.so
+BUILD_CUSTOM_LIBCXX ?= 1
+endif # gfortran
+endif # FreeBSD
+
 ifneq ($(CC_BASE)$(CXX_BASE),$(shell echo $(CC) | cut -d' ' -f1)$(shell echo $(CXX) | cut -d' ' -f1))
     $(error Forgot override directive on CC or CXX in Make.user? Cowardly refusing to build)
 endif
@@ -736,6 +767,8 @@ endif
 endif
 
 ifeq ($(OS),WINNT)
+LIBUNWIND:=
+else ifneq ($(DISABLE_LIBUNWIND), 0)
 LIBUNWIND:=
 else
 ifeq ($(USE_SYSTEM_LIBUNWIND), 1)
@@ -985,6 +1018,10 @@ ifeq ($(USE_OPROFILE_JITEVENTS), 1)
 JCPPFLAGS += -DJL_USE_OPROFILE_JITEVENTS
 endif
 
+ifeq ($(DISABLE_LIBUNWIND), 1)
+JCPPFLAGS += -DJL_DISABLE_LIBUNWIND
+endif
+
 # Intel libraries
 
 ifeq ($(USE_INTEL_LIBM), 1)
@@ -1069,8 +1106,14 @@ endif
 # Custom libcxx
 ifeq ($(BUILD_CUSTOM_LIBCXX),1)
 LDFLAGS += -L$(build_libdir)
-CXXLDFLAGS += -L$(build_libdir) -lc++abi -stdlib=libc++ -lc++
-CPPFLAGS += -I$(build_includedir)/c++/v1
+CXXLDFLAGS += -L$(build_libdir) -lc++abi -lc++
+ifeq ($(USECLANG),1)
+CXXLDFLAGS += -stdlib=libc++
+else
+ifeq ($(USEGCC),1)
+$(error BUILD_CUSTOM_LIBCXX is currently only supported with Clang. Try setting BUILD_CUSTOM_LIBCXX=0)
+endif
+endif # Clang
 CUSTOM_LD_LIBRARY_PATH := LD_LIBRARY_PATH="$(build_libdir)"
 ifeq ($(USEICC),1)
 CXXFLAGS += -cxxlib-nostd -static-intel

@@ -122,7 +122,7 @@ mutable struct InferenceState
     bestguess #::Type
     # current active instruction pointers
     ip::IntSet
-    pc´´::Int
+    pc´´::LineNum
     nstmts::Int
     # current exception handler info
     cur_hand #::Tuple{LineNum, Tuple{LineNum, ...}}
@@ -130,7 +130,7 @@ mutable struct InferenceState
     n_handlers::Int
     # ssavalue sparsity and restart info
     ssavalue_uses::Vector{IntSet}
-    ssavalue_init::Vector{Any}
+    ssavalue_defs::Vector{LineNum}
 
     backedges::Vector{Tuple{InferenceState, LineNum}} # call-graph backedges connecting from callee to caller
     callers_in_cycle::Vector{InferenceState}
@@ -167,7 +167,8 @@ mutable struct InferenceState
             sp = linfo.sparam_vals
         end
 
-        src.ssavaluetypes = Any[ NF for i = 1:(src.ssavaluetypes::Int) ]
+        nssavalues = src.ssavaluetypes::Int
+        src.ssavaluetypes = Any[ NF for i = 1:nssavalues ]
 
         n = length(code)
         s_edges = Any[ () for i = 1:n ]
@@ -235,8 +236,8 @@ mutable struct InferenceState
             @assert la == 0 # wrong number of arguments
         end
 
-        ssavalue_uses = find_ssavalue_uses(code)
-        ssavalue_init = copy(src.ssavaluetypes::Vector{Any})
+        ssavalue_uses = find_ssavalue_uses(code, nssavalues)
+        ssavalue_defs = find_ssavalue_defs(code, nssavalues)
 
         # exception handlers
         cur_hand = ()
@@ -266,7 +267,7 @@ mutable struct InferenceState
             nargs, s_types, s_edges,
             Union{}, W, 1, n,
             cur_hand, handler_at, n_handlers,
-            ssavalue_uses, ssavalue_init,
+            ssavalue_uses, ssavalue_defs,
             Vector{Tuple{InferenceState,LineNum}}(), # backedges
             Vector{InferenceState}(), # callers_in_cycle
             #=parent=#nothing,
@@ -542,7 +543,47 @@ add_tfunc(===, 2, 2,
         end
         return Bool
     end)
-add_tfunc(isdefined, 1, IInf, (args...)->Bool)
+function isdefined_tfunc(args...)
+    arg1 = args[1]
+    if isa(arg1, Const)
+        a1 = typeof(arg1.val)
+    else
+        a1 = widenconst(arg1)
+    end
+    if isType(a1)
+        return Bool
+    end
+    a1 = unwrap_unionall(a1)
+    if isa(a1, DataType) && !a1.abstract
+        if a1 <: Array # TODO update when deprecation is removed
+        elseif a1 === Module
+            length(args) == 2 || return Bottom
+            sym = args[2]
+            Symbol <: widenconst(sym) || return Bottom
+            if isa(sym, Const) && isa(sym.val, Symbol) && isa(arg1, Const) && isdefined(arg1.val, sym.val)
+                return Const(true)
+            end
+        elseif length(args) == 2 && isa(args[2], Const)
+            val = args[2].val
+            idx::Int = 0
+            if isa(val, Symbol)
+                idx = fieldindex(a1, val, false)
+            elseif isa(val, Int)
+                idx = val
+            else
+                return Bottom
+            end
+            if 1 <= idx <= a1.ninitialized
+                return Const(true)
+            elseif idx <= 0 || (idx > nfields(a1) && !isvatuple(a1))
+                return Const(false)
+            end
+        end
+    end
+    Bool
+end
+# TODO change IInf to 2 when deprecation is removed
+add_tfunc(isdefined, 1, IInf, isdefined_tfunc)
 add_tfunc(Core.sizeof, 1, 1, x->Int)
 add_tfunc(nfields, 1, 1,
     function (x::ANY)
@@ -1489,6 +1530,12 @@ function precise_container_type(arg::ANY, typ::ANY, vtypes::VarTable, sv::Infere
         end
     end
 
+    while isa(arg, SSAValue)
+        def = sv.ssavalue_defs[arg.id + 1]
+        stmt = sv.src.code[def]::Expr
+        arg = stmt.args[2]
+    end
+
     tti0 = widenconst(typ)
     tti = unwrap_unionall(tti0)
     if isa(arg, Expr) && arg.head === :call && (abstract_evals_to_constant(arg.args[1], svec, vtypes, sv) ||
@@ -2064,6 +2111,25 @@ function abstract_eval(e::ANY, vtypes::VarTable, sv::InferenceState)
         return abstract_eval_constant(e.args[1])
     elseif e.head === :invoke
         error("type inference data-flow error: tried to double infer a function")
+    elseif e.head === :isdefined
+        sym = e.args[1]
+        t = Bool
+        if isa(sym, Slot)
+            vtyp = vtypes[slot_id(sym)]
+            if vtyp.typ === Bottom
+                t = Const(false) # never assigned previously
+            elseif !vtyp.undef
+                t = Const(true) # definitely assigned previously
+            end
+        elseif isa(sym, Symbol)
+            if isdefined(sv.mod, sym.name)
+                t = Const(true)
+            end
+        elseif isa(sym, GlobalRef)
+            if isdefined(sym.mod, sym.name)
+                t = Const(true)
+            end
+        end
     else
         t = Any
     end
@@ -2334,49 +2400,53 @@ end
 
 #### helper functions for typeinf initialization and looping ####
 
-function label_counter(body)
+function label_counter(body::Vector{Any})
     l = -1
     for b in body
-        if isa(b,LabelNode) && (b::LabelNode).label > l
-            l = (b::LabelNode).label
+        if isa(b, LabelNode) && b.label > l
+            l = b.label
         end
     end
     return l
 end
 genlabel(sv) = LabelNode(sv.label_counter += 1)
 
-function find_ssavalue_uses(body)
-    uses = IntSet[]
-    for line = 1:length(body)
-        find_ssavalue_uses(body[line], uses, line)
+function find_ssavalue_uses(body::Vector{Any}, nvals::Int)
+    uses = IntSet[ IntSet() for i = 1:nvals ]
+    for line in 1:length(body)
+        e = body[line]
+        isa(e, Expr) && find_ssavalue_uses(e, uses, line)
     end
     return uses
 end
-function find_ssavalue_uses(e::ANY, uses, line)
-    if isa(e,SSAValue)
-        id = (e::SSAValue).id + 1
-        while length(uses) < id
-            push!(uses, IntSet())
-        end
-        push!(uses[id], line)
-    elseif isa(e,Expr)
-        b = e::Expr
-        head = b.head
-        is_meta_expr_head(head) && return
-        if head === :(=)
-            if isa(b.args[1],SSAValue)
-                id = (b.args[1]::SSAValue).id + 1
-                while length(uses) < id
-                    push!(uses, IntSet())
-                end
-            end
-            find_ssavalue_uses(b.args[2], uses, line)
-            return
-        end
-        for a in b.args
+
+function find_ssavalue_uses(e::Expr, uses::Vector{IntSet}, line::Int)
+    head = e.head
+    is_meta_expr_head(head) && return
+    skiparg = (head === :(=))
+    for a in e.args
+        if skiparg
+            skiparg = false
+        elseif isa(a, SSAValue)
+            push!(uses[a.id + 1], line)
+        elseif isa(a, Expr)
             find_ssavalue_uses(a, uses, line)
         end
     end
+end
+
+function find_ssavalue_defs(body::Vector{Any}, nvals::Int)
+    defs = zeros(Int, nvals)
+    for line in 1:length(body)
+        e = body[line]
+        if isa(e, Expr) && e.head === :(=)
+            lhs = e.args[1]
+            if isa(lhs, SSAValue)
+                defs[lhs.id + 1] = line
+            end
+        end
+    end
+    return defs
 end
 
 function newvar!(sv::InferenceState, typ::ANY)
@@ -3389,7 +3459,7 @@ end
 const _pure_builtins = Any[tuple, svec, fieldtype, apply_type, ===, isa, typeof, UnionAll, nfields]
 
 # known effect-free calls (might not be affect-free)
-const _pure_builtins_volatile = Any[getfield, arrayref]
+const _pure_builtins_volatile = Any[getfield, arrayref, isdefined]
 
 function is_pure_intrinsic(f::IntrinsicFunction)
     return !(f === Intrinsics.pointerref || # this one is volatile
@@ -4342,6 +4412,10 @@ const corenumtype = Union{Int32, Int64, Float32, Float64}
 # return inlined replacement for `e`, inserting new needed statements
 # at index `ins` in `stmts`.
 function inlining_pass(e::Expr, sv::InferenceState, stmts, ins)
+    if e.head === :isdefined
+        isa(e.typ, Const) && return e.typ.val
+        return e
+    end
     if e.head === :method
         # avoid running the inlining pass on function definitions
         return e
@@ -4654,15 +4728,22 @@ function replace_vars!(src::CodeInfo, r::ObjectIdDict)
 end
 
 function _replace_vars!(e::ANY, r::ObjectIdDict)
-    if isa(e,SSAValue) || isa(e,Slot)
+    if isa(e, SSAValue) || isa(e, Slot)
         v = normvar(e)
         if haskey(r, v)
             return r[v]
         end
     end
-    if isa(e,Expr)
+    if isa(e, Expr)
         for i = 1:length(e.args)
-            e.args[i] = _replace_vars!(e.args[i], r)
+            a = e.args[i]
+            if e.head === :isdefined
+                if e.args[i] !== _replace_vars!(a, r)
+                    return true
+                end
+            else
+                e.args[i] = _replace_vars!(a, r)
+            end
         end
     end
     return e

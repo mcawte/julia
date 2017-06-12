@@ -249,10 +249,11 @@ show_supertypes(typ::DataType) = show_supertypes(STDOUT, typ)
 macro show(exs...)
     blk = Expr(:block)
     for ex in exs
-        push!(blk.args, :(println($(sprint(show_unquoted,ex)*" = "),
-                                  repr(begin value=$(esc(ex)) end))))
+        push!(blk.args, :(print($(sprint(show_unquoted,ex)*" = "))))
+        push!(blk.args, :(show(STDOUT, "text/plain", begin value=$(esc(ex)) end)))
+        push!(blk.args, :(println()))
     end
-    if !isempty(exs); push!(blk.args, :value); end
+    isempty(exs) || push!(blk.args, :value)
     return blk
 end
 
@@ -1362,7 +1363,7 @@ function alignment(io::IO, x::Real)
 end
 "`alignment(1 + 10im)` yields (3,5) for `1 +` and `_10im` (plus sign on left, space on right)"
 function alignment(io::IO, x::Complex)
-    m = match(r"^(.*[\+\-])(.*)$", sprint(0, show, x, env=io))
+    m = match(r"^(.*[^e][\+\-])(.*)$", sprint(0, show, x, env=io))
     m === nothing ? (length(sprint(0, show, x, env=io)), 0) :
                    (length(m.captures[1]), length(m.captures[2]))
 end

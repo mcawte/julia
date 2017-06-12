@@ -3280,10 +3280,10 @@ static jl_value_t *_jl_restore_incremental(ios_t *f)
     // at this point, the AST is fully reconstructed, but still completely disconnected
     // now all of the interconnects will be created
     jl_recache_types(); // make all of the types identities correct
+    jl_recache_other(&dependent_worlds); // make all of the other objects identities correct (needs to be after recache types)
     init_order = jl_finalize_deserializer(&s, tracee_list); // done with f and s (needs to be after recache types)
-    jl_insert_methods(&external_methods); // hook up methods of external generic functions (needs to be after recache types)
-    jl_recache_other(&dependent_worlds); // make all of the other objects identities correct (needs to be after insert methods)
-    jl_insert_backedges(&external_backedges); // restore external backedges (needs to be after recache other)
+    jl_insert_methods(&external_methods); // hook up methods of external generic functions (needs to be after recache other)
+    jl_insert_backedges(&external_backedges); // restore external backedges (needs to be after insert methods)
     free_linkedlist(external_methods.next);
     free_linkedlist(external_backedges.next);
     serializer_worklist = NULL;
@@ -3347,7 +3347,7 @@ void jl_init_serializer(void)
 
                      jl_emptysvec, jl_emptytuple, jl_false, jl_true, jl_nothing, jl_any_type,
                      call_sym, invoke_sym, goto_ifnot_sym, return_sym, body_sym, line_sym,
-                     lambda_sym, jl_symbol("tuple"), assign_sym,
+                     lambda_sym, jl_symbol("tuple"), assign_sym, isdefined_sym,
 
                      // empirical list of very common symbols
                      #include "common_symbols1.inc"

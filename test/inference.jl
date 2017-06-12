@@ -843,3 +843,70 @@ f21771(::Val{U}) where {U} = Tuple{g21771(U)}
 # ensure that we don't try to resolve cycles using uncached edges
 f21653() = f21653()
 @test code_typed(f21653, Tuple{}, optimize=false)[1] isa Pair{CodeInfo, typeof(Union{})}
+
+# ensure _apply can "see-through" SSAValue to infer precise container types
+let f, m
+    f() = 0
+    m = first(methods(f))
+    m.source = Base.uncompressed_ast(m)::CodeInfo
+    m.source.ssavaluetypes = 1
+    m.source.code = Any[
+        Expr(:(=), SSAValue(0), Expr(:call, GlobalRef(Core, :svec), 1, 2, 3)),
+        Expr(:return, Expr(:call, Core._apply, :+, SSAValue(0)))
+    ]
+    @test @inferred(f()) == 6
+end
+
+# issue #22290
+f22290() = return nothing
+for i in 1:3
+    ir = sprint(io->code_llvm(io, f22290, Tuple{}))
+    @test contains(ir, "julia_f22290")
+end
+
+# constant inference of isdefined
+let f(x) = isdefined(x, 2) ? 1 : ""
+    @test Base.return_types(f, (Tuple{Int,Int},)) == Any[Int]
+    @test Base.return_types(f, (Tuple{Int,},)) == Any[String]
+end
+let f(x) = isdefined(x, :re) ? 1 : ""
+    @test Base.return_types(f, (Complex64,)) == Any[Int]
+    @test Base.return_types(f, (Complex,)) == Any[Int]
+end
+let f(x) = isdefined(x, :NonExistentField) ? 1 : ""
+    @test Base.return_types(f, (Complex64,)) == Any[String]
+    @test Union{Int,String} <: Base.return_types(f, (AbstractArray,))[1]
+end
+import Core.Inference: Const, isdefined_tfunc, ⊑
+@test isdefined_tfunc(Complex64, Const(())) === Union{}
+@test isdefined_tfunc(Complex64, Const(1)) === Const(true)
+@test isdefined_tfunc(Complex64, Const(2)) === Const(true)
+@test isdefined_tfunc(Complex64, Const(3)) === Const(false)
+@test isdefined_tfunc(Complex64, Const(0)) === Const(false)
+mutable struct SometimesDefined
+    x
+    function SometimesDefined()
+        v = new()
+        if rand(Bool)
+            v.x = 0
+        end
+        return v
+    end
+end
+@test isdefined_tfunc(SometimesDefined, Const(:x)) == Bool
+@test isdefined_tfunc(SometimesDefined, Const(:y)) === Const(false)
+@test isdefined_tfunc(Const(Base), Const(:length)) === Const(true)
+@test isdefined_tfunc(Const(Base), Symbol) == Bool
+@test isdefined_tfunc(Const(Base), Const(:NotCurrentlyDefinedButWhoKnows)) == Bool
+@test isdefined_tfunc(SimpleVector, Const(1)) === Const(true)
+@test isdefined_tfunc(SimpleVector, Const(:length)) === Const(true)
+@test Const(false) ⊑ isdefined_tfunc(Const(:x), Symbol)
+@test Const(false) ⊑ isdefined_tfunc(Const(:x), Const(:y))
+@test isdefined_tfunc(Vector{Int}, Const(1)) == Bool
+@test isdefined_tfunc(Vector{Any}, Const(1)) == Bool
+@test isdefined_tfunc(Module, Any, Any) === Union{}
+@test isdefined_tfunc(Module, Int) === Union{}
+@test isdefined_tfunc(Tuple{Any,Vararg{Any}}, Const(0)) === Const(false)
+@test isdefined_tfunc(Tuple{Any,Vararg{Any}}, Const(1)) === Const(true)
+@test isdefined_tfunc(Tuple{Any,Vararg{Any}}, Const(2)) === Bool
+@test isdefined_tfunc(Tuple{Any,Vararg{Any}}, Const(3)) === Bool
